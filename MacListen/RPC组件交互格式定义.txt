@@ -1,0 +1,22 @@
+﻿PS：
+1、消息交互统一以MessageEntity实体格式进行交互
+
+【请求格式定义】：
+1、获取存储映射规则。消息内容为“StorageRule-Request”
+2、插件运行状态上报。消息Key=Plugin-Live，Data_Str为序列化的PluginLive内容Json。返回Key=Plugin-Live，内容为Live<PlugLive>内容Json
+3、插件退出上报。消息Key=Plugin-Exit，Data_Str为序列化的PluginLive内容Json。返回Key=Plugin-Exit，内容为空。
+
+
+【其他组件交互格式定义】：
+1、发布查询任务。
+交换器名(ExChangeName)：wifi-searchtask
+消息Topic键（RoutingKey）:mulitsearchtask
+内容格式：{"taskId":"",unitId="","tableName":"",readServer:{"ip":"","port":"",serviceName="",userId="",pwd=""},"writeServer":{"ip":"","port":"",serviceName="",userId="",pwd=""}}
+
+2、通知缓存组件
+交换器名(ExChangeName)：wifi-component-message
+消息Topic键（RoutingKey）: cachenotice
+内容格式：{"type":"",tablename:"",key:"",value:"",data:{}}
+type定义:addtask,insert,update,delete
+
+
