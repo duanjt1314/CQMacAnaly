@@ -66,7 +66,7 @@ namespace CQMacAnaly
             return time;
         }
 
-        public static double ConvertDateTimeInt(DateTime time)
+        public static long ConvertDateTimeInt(DateTime time)
         {
             TimeSpan ts = (TimeSpan)(time - new DateTime(1970, 1, 1, 8, 0, 0));
             return Int64.Parse(Math.Ceiling(ts.TotalSeconds) + "");
