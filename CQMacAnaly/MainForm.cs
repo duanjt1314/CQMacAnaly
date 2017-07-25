@@ -451,7 +451,7 @@ namespace CQMacAnaly
                 MessageBox.Show("必须选择数据文件目录！");
                 return;
             }
-            
+
             Thread thread = new Thread(new ParameterizedThreadStart(FindMacCount));
             thread.IsBackground = true;
             thread.Start(new MacCount
@@ -467,7 +467,8 @@ namespace CQMacAnaly
 
         private void FindMacCount(object obj)
         {
-            Dictionary<string, string> dic = new Dictionary<string, string>();
+            //外层的键表示场所编码,内层的键表示具体的MAC
+            Dictionary<string, Dictionary<string, string>> dic = new Dictionary<string, Dictionary<string, string>>();
             MacCount macCount = (MacCount)obj;
             //查找 ZIP文件列表，并解压到临时目录处理
             var files = Directory.EnumerateFiles(macCount.DataPath, "*", SearchOption.TopDirectoryOnly);
@@ -499,10 +500,21 @@ namespace CQMacAnaly
 
                             if (detect_time >= macCount.BeginTime && detect_time <= macCount.EndTime && macCount.SiteIds.Contains(site_id))
                             {
-                                if (!dic.ContainsKey(mac))
+                                if (dic.ContainsKey(site_id))
                                 {
-                                    dic.Add(mac, null);
+                                    var macs = dic[site_id];
+                                    if (!macs.ContainsKey(mac))
+                                    {
+                                        macs.Add(mac, null);
+                                    }
                                 }
+                                else
+                                {
+                                    Dictionary<string, string> macs = new Dictionary<string, string>();
+                                    macs.Add(mac, null);
+                                    dic.Add(site_id, macs);
+                                }
+
                             }
 
                         }
@@ -515,7 +527,16 @@ namespace CQMacAnaly
                 });
             });
 
-            Disply("文件分析完成,去重后的MAC数量是:" + dic.Count);
+            StringBuilder sb = new StringBuilder();
+            foreach (var key in dic.Keys)
+            {
+                sb.AppendLine(key + "\t" + dic[key].Count);
+            }
+
+            String fileName = AppDomain.CurrentDomain.BaseDirectory+"\\"+"去重统计.txt";
+            File.WriteAllText(fileName, sb.ToString());
+            System.Diagnostics.Process.Start(AppDomain.CurrentDomain.BaseDirectory);
+            Disply("文件分析完成,数据保存在:" + fileName);
         }
 
 
