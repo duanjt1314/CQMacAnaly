@@ -11,6 +11,11 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Configuration;
 using System.Data.SqlClient;
+using System.Threading.Tasks;
+using CQMacAnaly.bean;
+using Newtonsoft.Json;
+using System.Diagnostics;
+using HZ.Common;
 
 namespace CQMacAnaly
 {
@@ -528,17 +533,236 @@ namespace CQMacAnaly
             });
 
             StringBuilder sb = new StringBuilder();
+            sb.AppendLine("场所去重采集数据统计:");
+            sb.AppendLine("场所编码\t采集数量");
             foreach (var key in dic.Keys)
             {
                 sb.AppendLine(key + "\t" + dic[key].Count);
             }
 
-            String fileName = AppDomain.CurrentDomain.BaseDirectory+"\\"+"去重统计.txt";
+            String fileName = AppDomain.CurrentDomain.BaseDirectory + "\\" + "去重统计" + macCount.BeginTime.ToString() + " - " + macCount.EndTime.ToString() + ".txt";
             File.WriteAllText(fileName, sb.ToString());
             System.Diagnostics.Process.Start(AppDomain.CurrentDomain.BaseDirectory);
             Disply("文件分析完成,数据保存在:" + fileName);
         }
 
+        private void button4_Click(object sender, EventArgs e)
+        {
+            string dataPath = txtDataPath.Text;
+            string tempPath = txtTmpPath.Text;
+            if (string.IsNullOrWhiteSpace(dataPath) || string.IsNullOrWhiteSpace(tempPath))
+            {
+                MessageBox.Show("必须选择数据文件目录！");
+                return;
+            }
 
+            Thread thread = new Thread(new ParameterizedThreadStart(FindDetectCount));
+            thread.IsBackground = true;
+            thread.Start(new MacCount
+            {
+                DataPath = dataPath,
+                TempPath = tempPath,
+                BeginTime = Methods.ConvertDateTimeInt(this.dateTimePicker2.Value),
+                EndTime = Methods.ConvertDateTimeInt(this.dateTimePicker1.Value),
+                SiteIds = this.textBox3.Text
+            });
+        }
+
+        private void FindDetectCount(object obj)
+        {
+            //外层的键表示场所编码,内层的键表示具体的MAC
+            Dictionary<string, int> dic = new Dictionary<string, int>();
+            MacCount macCount = (MacCount)obj;
+            //查找 ZIP文件列表，并解压到临时目录处理
+            var files = Directory.EnumerateFiles(macCount.DataPath, "*", SearchOption.TopDirectoryOnly);
+            files.ToList().ForEach(file =>
+            {
+                Disply("开始解压文件" + file + "");
+                using (ZipFile zipFile = new ZipFile(file))
+                {
+                    zipFile.ExtractAll(macCount.TempPath + "/" + Path.GetFileNameWithoutExtension(file), true);
+                }
+                Disply("文件" + file + "解压成功，开始数据分析，该操作耗时较长，请耐心等待...");
+                //只获取终端特征信息的文件
+                var zipFiles = Directory.EnumerateFiles(macCount.TempPath + "/" + Path.GetFileNameWithoutExtension(file), "*_WifiTerminalInfoLog_*", SearchOption.TopDirectoryOnly);
+                int i = 0;
+                int count = zipFiles.Count();
+                zipFiles.ToList().ForEach(macFile =>
+                {
+                    try
+                    {
+                        i++;
+                        Disply("文件" + file + "解压成功，开始数据分析，该操作耗时较长，请耐心等待..." + "当前步骤" + i + "/" + count);
+                        string data = Methods.ReadGzip(File.ReadAllBytes(macFile));
+                        DataTable dt = Methods.String2DataTable(data);
+                        foreach (DataRow row in dt.Rows)
+                        {
+                            var mac = row["terminal_mac"].ToString();
+                            var detect_time = Convert.ToInt64(row["detect_time"].ToString());
+                            var site_id = row["site_id"].ToString();
+
+                            if (detect_time >= macCount.BeginTime && detect_time <= macCount.EndTime && macCount.SiteIds.Contains(site_id))
+                            {
+                                if (dic.ContainsKey(site_id))
+                                {
+                                    var num = dic[site_id];
+                                    dic[site_id] = num + 1;
+                                }
+                                else
+                                {
+                                    dic.Add(site_id, 1);
+                                }
+                            }
+                        }
+
+                    }
+                    catch
+                    {
+
+                    }
+                });
+            });
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("场所采集数据统计:");
+            sb.AppendLine("场所编码\t采集数量");
+            foreach (var key in dic.Keys)
+            {
+                sb.AppendLine(key + "\t" + dic[key]);
+            }
+
+            String fileName = AppDomain.CurrentDomain.BaseDirectory + "\\" + "采集统计" + macCount.BeginTime.ToString() + " - " + macCount.EndTime.ToString() + ".txt";
+            File.WriteAllText(fileName, sb.ToString());
+            System.Diagnostics.Process.Start(AppDomain.CurrentDomain.BaseDirectory);
+            Disply("文件分析完成,数据保存在:" + fileName);
+        }
+
+        //MAC采集和去重统计,使用多线程来跑
+        private void button5_Click(object sender, EventArgs e)
+        {
+            string dataPath = txtDataPath.Text;
+            string tempPath = txtTmpPath.Text;
+            if (string.IsNullOrWhiteSpace(dataPath) || string.IsNullOrWhiteSpace(tempPath))
+            {
+                MessageBox.Show("必须选择数据文件目录！");
+                return;
+            }
+
+            Thread thread = new Thread(new ParameterizedThreadStart(FindDetectCount2));
+            thread.IsBackground = true;
+            thread.Start(new MacCount
+            {
+                DataPath = dataPath,
+                TempPath = tempPath,
+                BeginTime = Methods.ConvertDateTimeInt(this.dateTimePicker4.Value),
+                EndTime = Methods.ConvertDateTimeInt(this.dateTimePicker3.Value),
+                SiteIds = this.textBox4.Text
+            });
+        }
+
+        private object lockObj = new object();
+
+        private void FindDetectCount2(object obj)
+        {
+            int fileCount = 0;
+            List<TerminalInfo> terminalInfos = new List<TerminalInfo>();
+            MacCount macCount = (MacCount)obj;
+            Stopwatch watch = new Stopwatch();
+            watch.Start();
+            //查找 ZIP文件列表，并解压到临时目录处理
+            var files = Directory.EnumerateFiles(macCount.DataPath, "*", SearchOption.TopDirectoryOnly);
+            List<Task> tasks = new List<Task>();
+            files.ToList().ForEach(file =>
+            {
+                Task task = Task.Factory.StartNew((f) =>
+                {
+                    Disply("开始解压文件" + file + "");
+                    using (ZipFile zipFile = new ZipFile(file))
+                    {
+                        zipFile.ExtractAll(macCount.TempPath + "/" + Path.GetFileNameWithoutExtension(file), true);
+                    }
+
+                    //只获取终端特征信息的文件
+                    var zipFiles = Directory.EnumerateFiles(macCount.TempPath + "/" + Path.GetFileNameWithoutExtension(file), "*_WifiTerminalInfoLog_*", SearchOption.TopDirectoryOnly);
+                    int count = zipFiles.Count();
+                    zipFiles.ToList().ForEach(macFile =>
+                    {
+                        try
+                        {
+                            string data = Methods.ReadGzip(File.ReadAllBytes(macFile));
+                            DataTable dt = Methods.String2DataTable(data);
+
+                            //锁住
+                            lock (lockObj)
+                            {
+                                foreach (DataRow row in dt.Rows)
+                                {
+                                    var mac = row["terminal_mac"].ToString();
+                                    var detect_time = row["detect_time"].ToString().GetInt64();
+                                    var site_id = row["site_id"].ToString();
+
+                                    if (detect_time >= macCount.BeginTime && detect_time <= macCount.EndTime && macCount.SiteIds.Contains(site_id))
+                                    {
+                                        terminalInfos.Add(new TerminalInfo()
+                                        {
+                                            SiteId = site_id,
+                                            MAC = mac
+                                        });
+                                    }
+                                }
+                                fileCount++;
+                            }
+
+                            Disply("文件:" + macFile + "处理成功,即将删除");
+                            File.Delete(macFile);
+
+                        }
+                        catch (Exception ex)
+                        {
+                            LogHelper.Log.Error("", ex);
+                        }
+                    });
+
+                }, file);
+                tasks.Add(task);
+
+                if (tasks.Count >= 3)
+                {
+                    Task.WaitAll(tasks.ToArray());
+                    tasks.Clear();
+                }
+
+            });
+
+            if (tasks.Count > 0)
+                Task.WaitAll(tasks.ToArray());
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("场所采集数据统计:");
+            sb.AppendLine("场所编码\t采集数量\t去重数量");
+
+            foreach (var item in macCount.SiteIds.Split(','))
+            {
+                var caiji = terminalInfos.Count(f => f.SiteId == item);
+                var quchong = terminalInfos.Where(f => f.SiteId == item).Select(f => f.MAC).Distinct().Count();
+                //打印出来看看
+                Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(terminalInfos.Where(f => f.SiteId == item).ToList()));
+
+                sb.AppendLine(item + "\t" + caiji + "\t" + quchong);
+            }
+
+            watch.Stop();
+            sb.AppendLine("共处理gz文件" + fileCount + "个,耗时:" + watch.ElapsedMilliseconds + "毫秒");
+
+            String fileName = AppDomain.CurrentDomain.BaseDirectory + "\\"
+                + "采集统计"
+                + Methods.ConvertIntDateTime(macCount.BeginTime).ToString("yyyyMMddHHmmss")
+                + " - "
+                + Methods.ConvertIntDateTime(macCount.EndTime).ToString("yyyyMMddHHmmss")
+                + ".txt";
+            File.WriteAllText(fileName, sb.ToString());
+            System.Diagnostics.Process.Start(AppDomain.CurrentDomain.BaseDirectory);
+            Disply("文件分析完成,数据保存在:" + fileName);
+        }
     }
 }
